@@ -1,0 +1,189 @@
+version: "3"
+
+networks:
+  TTT:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.18.5.0/16"
+
+services:
+  superset:
+    build:
+      context: ./superset
+      dockerfile: dockerfile
+    container_name: superset
+    ports:
+      - '8088:8088'
+    networks:
+         TTT:
+          ipv4_address: 172.18.5.1
+
+  mysql:
+    image: mysql:8.0.33
+    container_name: mysql
+    ports:
+      - '3306:3306'
+    command: --init-file /data/application/init.sql
+    volumes:
+      - ./mysql/init.sql:/data/application/init.sql
+    environment:
+      MYSQL_ROOT_USER: root
+      MYSQL_ROOT_PASSWORD: secret
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.2
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    hostname: zookeeper
+    container_name: zookeeper
+    environment:
+      - ZOOKEEPER_SERVER_ID=1
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+    ports:
+      - '12181:2181'
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.3
+
+  kafka-1:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka-1
+    hostname: kafka-1
+    restart: on-failure
+    depends_on:
+      - zookeeper
+    ports:
+      - '19092:19092'
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka-1:9092,PLAINTEXT_HOST://localhost:19092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=3
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.4
+
+  kafka-2:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka-2
+    hostname: kafka-2
+    restart: on-failure
+    depends_on:
+      - zookeeper
+    ports:
+      - '29092:29092'
+    environment:
+      - KAFKA_BROKER_ID=2
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka-2:9092,PLAINTEXT_HOST://localhost:29092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=3
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.5
+
+  kafka-3:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka-3
+    hostname: kafka-3
+    restart: on-failure
+    depends_on:
+      - zookeeper
+    ports:
+      - '39092:39092'
+    environment:
+      - KAFKA_BROKER_ID=3
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka-3:9092,PLAINTEXT_HOST://localhost:39092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=3
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.6
+
+  spark-master:
+    image: bde2020/spark-master:3.0.0-hadoop3.2
+    container_name: spark-master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+#    volume:
+#    -.
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.7
+
+  spark-worker-1:
+    image: bde2020/spark-worker:3.0.0-hadoop3.2
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.8
+
+  python-app:
+    build:
+      context: ./spark-streaming
+      dockerfile: dockerfile
+    depends_on:
+      - spark-master
+    volumes:
+      - ./data:/app/data # Mount the directory containing the CSV file
+    networks:
+      TTT:
+        ipv4_address: 172.18.5.9
+
+#  superset-create-dashboard:
+#    build:
+#      context: ./superset/dashboard
+#      dockerfile: dockerfile
+#    container_name: superset-create-dashboard
+#    depends_on:
+#      superset:
+#        condition: service_started
+#      mysql:
+#        condition: service_started
+#    volumes:
+#      - ./superset/dashboard/scripts:/scripts
+#    networks:
+#      TTT:
+#          ipv4_address: 172.18.5.10
+
+#  spark-consumer:
+#    image: docker.io/bitnami/spark:latest
+#    container_name: spark-consumer
+#    networks:
+#      TTT:
+#        ipv4_address: 172.18.5.11
+#    command: [ "/bin/bash", "-c", "/spark-setup.sh" ]
+#    depends_on:
+#      spark-master:
+#        condition: service_started
+#      mysql:
+#        condition: service_started
+#    volumes:
+#      - type: bind
+#        source: ./spark-streaming/spark-setup.sh
+#        target: /spark-setup.sh
+#      - ./spark-streaming/scripts:/home/scripts
